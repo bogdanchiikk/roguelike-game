@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Рогалик</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body, html { height: 100%; }
+        body { 
+            background-color: #000000; 
+            color: #ffffff; 
+            margin: 0; 
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        h1 { 
+            font-size: 30px; 
+            padding: 10px 0px; 
+            margin: 0px; 
+        }
+        .field-box { 
+            border: 2px solid #d0d0d0; 
+            float: left; 
+            margin-bottom: 20px;
+        }
+        .field { 
+            position: relative; 
+            width: 2000px;  /* 40 тайлов × 50px */
+            height: 1200px; /* 24 тайла × 50px */
+        }
+        /* Стили для тайлов с картинками */
+        .field .tile { 
+            position: absolute; 
+            width: 50px; 
+            height: 50px; 
+            background-size: 100%; 
+            background-image: url(images/tile-.png); /* Пол */
+            z-index: 5; 
+        }
+        .field .tileW { 
+            background-image: url(images/tile-W.png); /* Стена */
+        }
+        .field .tileE { 
+            background-image: url(images/tile-E.png); /* Враг */
+            z-index: 10; 
+        }
+        .field .tileP { 
+            background-image: url(images/tile-P.png); /* Игрок */
+            z-index: 10; 
+        }
+        .field .tileHP { 
+            background-image: url(images/tile-HP.png); /* Зелье здоровья */
+            z-index: 9; 
+        }
+        .field .tileSW { 
+            background-image: url(images/tile-SW.png); /* Меч */
+            z-index: 9; 
+        }
+        /* Полоски здоровья */
+        .field .tile .health { 
+            background-color: #ff0000; 
+            z-index: 11; 
+            position: absolute; 
+            left: 0px; 
+            top: 0px; 
+            height: 3px; 
+        }
+        .field .tileP .health { 
+            background-color: #00ff00; 
+        }
+        .stats { 
+            margin-bottom: 20px; 
+            font-size: 18px;
+        }
+        /* Окна окончания игры */
+        .game-over, .game-win {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            padding: 20px;
+            border: 2px solid red;
+            z-index: 100;
+        }
+        .game-win {
+            border-color: green;
+        }
+    </style>
+</head>
+<body>
+    <h1>РОГАЛИК</h1>
+    <div class="stats">
+        <div>Здоровье: <span id="health">100</span>/<span id="maxHealth">100</span></div>
+        <div>Урон: <span id="damage">10</span></div>
+        <div>Врагов осталось: <span id="enemiesCount">10</span></div>
+    </div>
+    <div class="field-box">
+        <div class="field"></div> <!-- Игровое поле -->
+    </div>
+    <div style="clear: both; margin-top: 20px;">
+        <strong>Управление:</strong> WASD - движение, ПРОБЕЛ - атака
+    </div>
+
+    <!-- Окно проигрыша -->
+    <div class="game-over" id="gameOver">
+        <h2>ИГРА ОКОНЧЕНА!</h2>
+        <p>Вы погибли в бою...</p>
+        <button onclick="location.reload()">Новая игра</button>
+    </div>
+
+    <!-- Окно победы -->
+    <div class="game-win" id="gameWin">
+        <h2>ПОБЕДА!</h2>
+        <p>Вы уничтожили всех врагов!</p>
+        <button onclick="location.reload()">Новая игра</button>
+    </div>
+
+    <script>
+        // ОСНОВНОЙ КОНСТРУКТОР ИГРЫ - хранит все состояние игры
+        function Game() {
+            // Размер карты по заданию: 40x24 тайлов
+            this.mapWidth = 40;
+            this.mapHeight = 24;
+            
+            // Двумерный массив для хранения карты (W - стена, ' ' - пол)
+            this.map = [];
+            
+            // Объект игрока
+            this.player = { 
+                x: 0, y: 0,           // позиция на карте
+                health: 100,          // текущее здоровье
+                maxHealth: 100,       // максимальное здоровье
+                damage: 10            // сила атаки
+            };
+            
+            // Массивы для объектов игры
+            this.enemies = [];        // враги
+            this.items = [];          // предметы
+            this.rooms = [];          // комнаты
+            this.gameActive = true;   // флаг активности игры
+        }
+
+        // ИНИЦИАЛИЗАЦИЯ ИГРЫ - запускается при старте
+        Game.prototype.init = function() {
+            this.generateMap();      // создаем карту
+            this.placePlayer();      // размещаем игрока
+            this.placeEnemies();     // размещаем врагов
+            this.placeItems();       // размещаем предметы
+            this.render();           // отрисовываем карту
+            this.setupControls();    // настраиваем управление
+            this.updateStats();      // обновляем статистику
+        };
+
+        // ГЕНЕРАЦИЯ КАРТЫ - пункты 1-4 задания
+        Game.prototype.generateMap = function() {
+            // Пункт 1-2: Создаем карту 40x24 и заполняем стенами
+            this.map = [];
+            for (let y = 0; y < this.mapHeight; y++) {
+                this.map[y] = [];
+                for (let x = 0; x < this.mapWidth; x++) {
+                    this.map[y][x] = 'W'; // 'W' - стена
+                }
+            }
+            
+            // Пункт 3: Генерируем комнаты
+            this.generateRooms();
+            // Пункт 4: Генерируем проходы и соединяем комнаты
+            this.generatePassages();
+        };
+
+        // ПУНКТ 3: ГЕНЕРАЦИЯ КОМНАТ (5-10 комнат размером 3-8 клеток)
+        Game.prototype.generateRooms = function() {
+            const roomCount = Math.floor(Math.random() * 6) + 5; // 5-10 комнат
+            this.rooms = [];
+            
+            for (let i = 0; i < roomCount; i++) {
+                let attempts = 0;
+                // Пытаемся разместить комнату
+                while (attempts < 100) {
+                    // Случайный размер комнаты 3-8 клеток
+                    const width = Math.floor(Math.random() * 6) + 3;
+                    const height = Math.floor(Math.random() * 6) + 3;
+                    // Случайная позиция на карте
+                    const x = Math.floor(Math.random() * (this.mapWidth - width - 2)) + 1;
+                    const y = Math.floor(Math.random() * (this.mapHeight - height - 2)) + 1;
+                    
+                    // Проверяем можно ли разместить комнату
+                    if (this.canPlaceRoom(x, y, width, height)) {
+                        this.createRoom(x, y, width, height);
+                        this.rooms.push({x, y, width, height});
+                        break;
+                    }
+                    attempts++;
+                }
+            }
+        };
+
+        // Проверка возможности размещения комнаты
+        Game.prototype.canPlaceRoom = function(x, y, width, height) {
+            // Проверяем область вокруг комнаты (с зазором в 1 клетку)
+            for (let ry = y - 1; ry < y + height + 1; ry++) {
+                for (let rx = x - 1; rx < x + width + 1; rx++) {
+                    // Проверяем границы карты
+                    if (rx < 0 || rx >= this.mapWidth || ry < 0 || ry >= this.mapHeight) {
+                        return false;
+                    }
+                    // Проверяем что нет других комнат рядом
+                    if (this.map[ry][rx] === ' ') {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        };
+
+        // Создание комнаты (замена стен на пол)
+        Game.prototype.createRoom = function(x, y, width, height) {
+            for (let ry = y; ry < y + height; ry++) {
+                for (let rx = x; rx < x + width; rx++) {
+                    this.map[ry][rx] = ' '; // ' ' - пол
+                }
+            }
+        };
+
+        // ПУНКТ 4: ГЕНЕРАЦИЯ ПРОХОДОВ И СОЕДИНЕНИЕ КОМНАТ
+        Game.prototype.generatePassages = function() {
+            // 3-5 горизонтальных проходов
+            const hPassages = Math.floor(Math.random() * 3) + 3;
+            // 3-5 вертикальных проходов
+            const vPassages = Math.floor(Math.random() * 3) + 3;
+            
+            // Создаем горизонтальные проходы через всю карту
+            for (let i = 0; i < hPassages; i++) {
+                const y = Math.floor(Math.random() * (this.mapHeight - 2)) + 1;
+                for (let x = 0; x < this.mapWidth; x++) {
+                    this.map[y][x] = ' ';
+                }
+            }
+            
+            // Создаем вертикальные проходы через всю карту
+            for (let i = 0; i < vPassages; i++) {
+                const x = Math.floor(Math.random() * (this.mapWidth - 2)) + 1;
+                for (let y = 0; y < this.mapHeight; y++) {
+                    this.map[y][x] = ' ';
+                }
+            }
+            
+            // ВАЖНО: СОЕДИНЯЕМ КОМНАТЫ С ПРОХОДАМИ чтобы не было недостижимых зон
+            this.connectRoomsToPassages();
+        };
+
+        // СОЕДИНЕНИЕ КОМНАТ С ПРОХОДАМИ - чтобы игрок мог добраться до всех врагов
+        Game.prototype.connectRoomsToPassages = function() {
+            for (const room of this.rooms) {
+                this.connectSingleRoomToPassage(room);
+            }
+        };
+
+        // СОЕДИНЕНИЕ ОДНОЙ КОМНАТЫ С БЛИЖАЙШИМ ПРОХОДОМ
+        Game.prototype.connectSingleRoomToPassage = function(room) {
+            // Находим центр комнаты
+            const roomCenter = {
+                x: Math.floor(room.x + room.width / 2),
+                y: Math.floor(room.y + room.height / 2)
+            };
+            
+            // Ищем ближайший проход (пустую клетку вне комнаты)
+            let nearestPassage = null;
+            let minDistance = Infinity;
+            
+            for (let y = 0; y < this.mapHeight; y++) {
+                for (let x = 0; x < this.mapWidth; x++) {
+                    // Если это проход (пол) и не внутри текущей комнаты
+                    if (this.map[y][x] === ' ' && 
+                        !(x >= room.x && x < room.x + room.width && 
+                          y >= room.y && y < room.y + room.height)) {
+                        
+                        const distance = Math.abs(x - roomCenter.x) + Math.abs(y - roomCenter.y);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            nearestPassage = {x, y};
+                        }
+                    }
+                }
+            }
+            
+            // Если нашли проход - соединяем с комнатой коридором
+            if (nearestPassage) {
+                this.createCorridor(roomCenter, nearestPassage);
+            }
+        };
+
+        // СОЗДАНИЕ КОРИДОРА МЕЖДУ ДВУМЯ ТОЧКАМИ
+        Game.prototype.createCorridor = function(from, to) {
+            // Двигаемся сначала по горизонтали, потом по вертикали
+            let x = from.x;
+            let y = from.y;
+            
+            // Горизонтальная часть коридора
+            while (x !== to.x) {
+                this.map[y][x] = ' ';
+                x += (to.x > x) ? 1 : -1;
+            }
+            
+            // Вертикальная часть коридора
+            while (y !== to.y) {
+                this.map[y][x] = ' ';
+                y += (to.y > y) ? 1 : -1;
+            }
+        };
+
+        // ПУНКТ 6: РАЗМЕЩЕНИЕ ИГРОКА В СЛУЧАЙНОМ ПУСТОМ МЕСТЕ
+        Game.prototype.placePlayer = function() {
+            const emptyCells = this.getEmptyCells();
+            if (emptyCells.length > 0) {
+                // Выбираем случайную пустую клетку
+                const pos = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+                this.player.x = pos.x;
+                this.player.y = pos.y;
+                this.map[pos.y][pos.x] = 'P'; // 'P' - игрок
+            }
+        };
+
+        // ПУНКТ 7: РАЗМЕЩЕНИЕ 10 ПРОТИВНИКОВ
+        Game.prototype.placeEnemies = function() {
+            const emptyCells = this.getEmptyCells();
+            this.enemies = [];
+            
+            // Размещаем 10 врагов
+            for (let i = 0; i < 10 && emptyCells.length > 0; i++) {
+                const index = Math.floor(Math.random() * emptyCells.length);
+                const pos = emptyCells.splice(index, 1)[0];
+                
+                this.map[pos.y][pos.x] = 'E'; // 'E' - враг
+                this.enemies.push({
+                    x: pos.x,
+                    y: pos.y,
+                    health: 30,      // здоровье врага
+                    damage: 5,       // урон врага
+                    maxHealth: 30
+                });
+            }
+        };
+
+        // ПУНКТ 5: РАЗМЕЩЕНИЕ ПРЕДМЕТОВ (2 меча и 10 зелий)
+        Game.prototype.placeItems = function() {
+            const emptyCells = this.getEmptyCells();
+            
+            // 2 меча
+            for (let i = 0; i < 2 && emptyCells.length > 0; i++) {
+                const index = Math.floor(Math.random() * emptyCells.length);
+                const pos = emptyCells.splice(index, 1)[0];
+                this.map[pos.y][pos.x] = 'SW'; // 'SW' - меч
+            }
+            
+            // 10 зелий здоровья
+            for (let i = 0; i < 10 && emptyCells.length > 0; i++) {
+                const index = Math.floor(Math.random() * emptyCells.length);
+                const pos = emptyCells.splice(index, 1)[0];
+                this.map[pos.y][pos.x] = 'HP'; // 'HP' - зелье здоровья
+            }
+        };
+
+        // Вспомогательная функция для получения списка пустых клеток
+        Game.prototype.getEmptyCells = function() {
+            const emptyCells = [];
+            for (let y = 0; y < this.mapHeight; y++) {
+                for (let x = 0; x < this.mapWidth; x++) {
+                    if (this.map[y][x] === ' ') { // ' ' - пустая клетка (пол)
+                        emptyCells.push({x, y});
+                    }
+                }
+            }
+            return emptyCells;
+        };
+
+        // ОТРИСОВКА КАРТЫ - преобразуем данные в визуальные элементы
+        Game.prototype.render = function() {
+            $('.field').empty(); // Очищаем поле
+            
+            // Проходим по всем клеткам карты
+            for (let y = 0; y < this.mapHeight; y++) {
+                for (let x = 0; x < this.mapWidth; x++) {
+                    const tile = $('<div class="tile"></div>');
+                    // Позиционируем тайл
+                    tile.css({
+                        left: x * 50 + 'px',
+                        top: y * 50 + 'px'
+                    });
+                    
+                    // Добавляем класс в зависимости от типа клетки
+                    const type = this.map[y][x];
+                    if (type === 'W') tile.addClass('tileW');   // стена
+                    else if (type === 'P') tile.addClass('tileP'); // игрок
+                    else if (type === 'E') tile.addClass('tileE'); // враг
+                    else if (type === 'HP') tile.addClass('tileHP'); // зелье
+                    else if (type === 'SW') tile.addClass('tileSW'); // меч
+                    
+                    // Добавляем полоски здоровья для врагов и игрока
+                    if (type === 'E' || type === 'P') {
+                        const healthDiv = $('<div class="health"></div>');
+                        let healthPercent = 100;
+                        
+                        if (type === 'E') {
+                            const enemy = this.findEnemyAt(x, y);
+                            if (enemy) {
+                                // Вычисляем процент здоровья врага
+                                healthPercent = (enemy.health / enemy.maxHealth) * 100;
+                            }
+                        } else if (type === 'P') {
+                            // Процент здоровья игрока
+                            healthPercent = (this.player.health / this.player.maxHealth) * 100;
+                        }
+                        
+                        healthDiv.css('width', healthPercent + '%');
+                        tile.append(healthDiv);
+                    }
+                    
+                    $('.field').append(tile);
+                }
+            }
+        };
+
+        // Поиск врага по координатам
+        Game.prototype.findEnemyAt = function(x, y) {
+            return this.enemies.find(enemy => enemy.x === x && enemy.y === y);
+        };
+
+        // ПУНКТ 8: НАСТРОЙКА УПРАВЛЕНИЯ WASD
+        Game.prototype.setupControls = function() {
+            const self = this;
+            $(document).on('keydown', function(e) {
+                if (!self.gameActive) return;
+                if (self.player.health <= 0) return;
+                
+                // Обрабатываем нажатия клавиш
+                switch (e.key.toLowerCase()) {
+                    case 'w': self.movePlayer(0, -1); break; // вверх
+                    case 'a': self.movePlayer(-1, 0); break; // влево
+                    case 's': self.movePlayer(0, 1); break;  // вниз
+                    case 'd': self.movePlayer(1, 0); break;  // вправо
+                    case ' ': self.attack(); break;          // атака
+                }
+            });
+        };
+
+        // ДВИЖЕНИЕ ИГРОКА
+        Game.prototype.movePlayer = function(dx, dy) {
+            if (!this.gameActive) return;
+            
+            // Вычисляем новую позицию
+            const newX = this.player.x + dx;
+            const newY = this.player.y + dy;
+            
+            // Проверяем границы карты
+            if (newX < 0 || newX >= this.mapWidth || newY < 0 || newY >= this.mapHeight) {
+                return;
+            }
+            
+            // Проверяем что клетка проходима (не стена)
+            const targetTile = this.map[newY][newX];
+            if (targetTile === 'W') return;
+            
+            // ПУНКТ 13: ПОДБОР ЗЕЛИЙ ЗДОРОВЬЯ (+20 HP)
+            if (targetTile === 'HP') {
+                this.player.health = Math.min(this.player.health + 20, this.player.maxHealth);
+            }
+            // ПУНКТ 14: ПОДБОР МЕЧЕЙ (+5 урона)
+            else if (targetTile === 'SW') {
+                this.player.damage += 5;
+            }
+            
+            // Перемещаем игрока
+            this.map[this.player.y][this.player.x] = ' '; // старая клетка становится полом
+            this.player.x = newX;
+            this.player.y = newY;
+            this.map[newY][newX] = 'P'; // новая клетка становится игроком
+            
+            this.render();
+            this.updateStats();
+            
+            // ПУНКТ 12: ХОД ВРАГОВ ПОСЛЕ ХОДА ИГРОКА
+            this.moveEnemies();
+        };
+
+        // ПУНКТ 9: АТАКА ПРОБЕЛОМ ВСЕХ СОСЕДНИХ ПРОТИВНИКОВ
+        Game.prototype.attack = function() {
+            if (!this.gameActive) return;
+            
+            // Все 8 направлений вокруг игрока (включая диагонали)
+            const directions = [
+                {dx: -1, dy: 0},   // слева
+                {dx: 1, dy: 0},    // справа
+                {dx: 0, dy: -1},   // сверху
+                {dx: 0, dy: 1},    // снизу
+                {dx: -1, dy: -1},  // сверху-слева
+                {dx: 1, dy: -1},   // сверху-справа
+                {dx: -1, dy: 1},   // снизу-слева
+                {dx: 1, dy: 1}     // снизу-справа
+            ];
+            
+            let hitCount = 0;
+            let killedEnemies = [];
+            
+            // Проверяем все 8 соседних клеток
+            for (const dir of directions) {
+                const checkX = this.player.x + dir.dx;
+                const checkY = this.player.y + dir.dy;
+                
+                // Проверяем что клетка в пределах карты
+                if (checkX >= 0 && checkX < this.mapWidth && checkY >= 0 && checkY < this.mapHeight) {
+                    // Проверяем что на клетке враг
+                    if (this.map[checkY][checkX] === 'E') {
+                        const enemy = this.findEnemyAt(checkX, checkY);
+                        if (enemy) {
+                            // Наносим урон врагу
+                            enemy.health -= this.player.damage;
+                            hitCount++;
+                            
+                            // Проверяем убит ли враг
+                            if (enemy.health <= 0) {
+                                killedEnemies.push(enemy);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Удаляем убитых врагов
+            for (const enemy of killedEnemies) {
+                this.map[enemy.y][enemy.x] = ' '; // убираем врага с карты
+                this.enemies = this.enemies.filter(e => e !== enemy); // удаляем из массива
+            }
+            
+            this.render();
+            this.updateStats();
+            
+            // Проверяем победу (все враги убиты)
+            this.checkWinCondition();
+            
+            // Враги отвечают на атаку
+            if (this.gameActive) {
+                this.moveEnemies();
+            }
+        };
+
+        // ПУНКТ 12: ДВИЖЕНИЕ ПРОТИВНИКОВ
+        Game.prototype.moveEnemies = function() {
+            // Двигаем каждого врага
+            for (const enemy of this.enemies) {
+                this.moveSingleEnemy(enemy);
+            }
+            
+            // ПУНКТ 11: АТАКА ИГРОКА ПРОТИВНИКАМИ
+            this.enemiesAttackPlayer();
+            
+            this.render();
+            this.updateStats();
+            
+            // Проверяем условия окончания игры
+            this.checkGameOver();
+            this.checkWinCondition();
+        };
+
+        // ДВИЖЕНИЕ ОДНОГО ВРАГА (случайное направление)
+        Game.prototype.moveSingleEnemy = function(enemy) {
+            // 4 направления движения (вверх, вниз, влево, вправо)
+            const directions = [
+                {dx: -1, dy: 0}, {dx: 1, dy: 0}, 
+                {dx: 0, dy: -1}, {dx: 0, dy: 1}
+            ];
+            
+            const validMoves = [];
+            
+            // Проверяем возможные направления движения
+            for (const dir of directions) {
+                const newX = enemy.x + dir.dx;
+                const newY = enemy.y + dir.dy;
+                
+                if (newX >= 0 && newX < this.mapWidth && newY >= 0 && newY < this.mapHeight) {
+                    // Может двигаться только на пустые клетки
+                    if (this.map[newY][newX] === ' ') {
+                        validMoves.push({x: newX, y: newY, dir});
+                    }
+                }
+            }
+            
+            // Если есть куда двигаться - двигаемся случайным образом
+            if (validMoves.length > 0) {
+                const move = validMoves[Math.floor(Math.random() * validMoves.length)];
+                this.map[enemy.y][enemy.x] = ' '; // освобождаем старую клетку
+                enemy.x = move.x;
+                enemy.y = move.y;
+                this.map[move.y][move.x] = 'E'; // занимаем новую клетку
+            }
+        };
+
+        // ПУНКТ 11: АТАКА ИГРОКА ПРОТИВНИКАМИ (когда враг рядом)
+        Game.prototype.enemiesAttackPlayer = function() {
+            for (const enemy of this.enemies) {
+                // Проверяем расстояние до игрока
+                const dx = Math.abs(enemy.x - this.player.x);
+                const dy = Math.abs(enemy.y - this.player.y);
+                
+                // Если враг соседний с игроком (включая диагонали)
+                if (dx <= 1 && dy <= 1) {
+                    // Наносим урон игроку
+                    this.player.health -= enemy.damage;
+                }
+            }
+        };
+
+        // ПРОВЕРКА ПРОИГРЫША (здоровье игрока <= 0)
+        Game.prototype.checkGameOver = function() {
+            if (this.player.health <= 0) {
+                this.gameActive = false;
+                $('#gameOver').show(); // показываем экран проигрыша
+            }
+        };
+
+        // ПРОВЕРКА ПОБЕДЫ (все враги убиты)
+        Game.prototype.checkWinCondition = function() {
+            if (this.enemies.length === 0 && this.gameActive) {
+                this.gameActive = false;
+                $('#gameWin').show(); // показываем экран победы
+            }
+        };
+
+        // ОБНОВЛЕНИЕ СТАТИСТИКИ НА ЭКРАНЕ
+        Game.prototype.updateStats = function() {
+            $('#health').text(this.player.health);
+            $('#maxHealth').text(this.player.maxHealth);
+            $('#damage').text(this.player.damage);
+            $('#enemiesCount').text(this.enemies.length);
+        };
+
+        // ЗАПУСК ИГРЫ ПРИ ЗАГРУЗКИ СТРАНИЦЫ
+        $(document).ready(function() {
+            const game = new Game();
+            game.init();
+        });
+    </script>
+</body>
+</html>
